@@ -10,6 +10,8 @@ from scipy import signal
 from stingray.pulse.search import epoch_folding_search, z_n_search
 from matplotlib.gridspec import GridSpec
 from stingray.pulse.search import phaseogram, plot_phaseogram, plot_profile
+from matplotlib.ticker import (MultipleLocator, FormatStrFormatter,
+                               AutoMinorLocator)
 
 def readevt(file,ind=1):
     '''
@@ -167,8 +169,11 @@ def phaserate(hists,mids,exptime,bgb=False,bg=[],ens=['0.3-10 keV','S: 0.3-1.5 k
             ax[0].set_ylabel('Counts/s',fontsize=18)
             ax[0].set_xlim(0,2)
             #specific to this dataset:
-            ax[0].set_ylim(0,14)
-            ax[0].set_yticks(np.arange(0,16,2))
+            if enhist:
+                ax[0].set_ylim(0,14)
+                ax[0].set_yticks(np.arange(0,16,2))
+                ax[0].xaxis.set_major_locator(MultipleLocator(0.5))
+                ax[0].xaxis.set_minor_locator(MultipleLocator(0.1))
         else: 
             ax.errorbar(mids,hist[0],yerr=err,linestyle='none',color=colors[h])
             ax.set_ylabel('Counts/s',fontsize=14)
@@ -176,7 +181,7 @@ def phaserate(hists,mids,exptime,bgb=False,bg=[],ens=['0.3-10 keV','S: 0.3-1.5 k
         errs.append(err)
     plt.xlim(0,2)
     plt.xlabel('Phase',fontsize=18)
-    if rate: ax[0].legend()
+    if rate: ax[0].legend(loc='lower right') #fixing for now
     else: ax.legend()
     if enhist: rloc = 2
     else: rloc = 1
@@ -198,8 +203,11 @@ def phaserate(hists,mids,exptime,bgb=False,bg=[],ens=['0.3-10 keV','S: 0.3-1.5 k
         ax[rloc].errorbar(mids,hr,yerr=rerr,linestyle='none',color='slateblue')
         ax[rloc].legend()
         ax[rloc].set_ylabel('Hardness Ratio',fontsize=18)
-        ax[rloc].set_ylim(-.2,.15)
-        ax[rloc].set_yticks(np.arange(-.2,.2,.05))
+        if enhist:
+            ax[rloc].set_ylim(-.2,.15)
+            ax[rloc].set_yticks(np.arange(-.2,.2,.05))
+            ax[rloc].xaxis.set_major_locator(MultipleLocator(0.5))
+            ax[rloc].xaxis.set_minor_locator(MultipleLocator(0.1))
         #add hardness ratio errors  
     #puts bg-subtracted, normalized, smoothed energy-phase heat map
     if enhist:
@@ -218,10 +226,22 @@ def phaserate(hists,mids,exptime,bgb=False,bg=[],ens=['0.3-10 keV','S: 0.3-1.5 k
 #             norm_bg[i,:] = norm_bg[i,:]/np.median(norm_bg[i,:]) #16 phase bins
         im = ax[1].imshow(norm_bg,cmap='plasma',interpolation='gaussian',aspect='auto')
         ax[1].set_xticks([])
-        ax[1].set_xticks([-0.5,-.5+31/8,-.5+62/8,-.5+93/8,-.5+124/8,-.5+155/8,-.5+186/8,31.5-31/8,31.5])
+        #ax[1].set_xticks([-0.5,-.5+31/8,-.5+62/8,-.5+93/8,-.5+124/8,-.5+155/8,-.5+186/8,31.5-31/8,31.5])
+        #just on multiples of 0.5 and then minor ticks
+        ax[1].set_xticks([-0.5,-.5+32/4,-.5+64/4,-.5+96/4,31.5])
         a=ax[1].get_xticks().tolist()
-        a=['0','0.25','0.5','0.75','1.0','1.25','1.50','1.75','2.0']
+        #a=['0','0.25','0.5','0.75','1.0','1.25','1.50','1.75','2.0']
+        a=['0','0.5','1.0','1.50','2.0']
         ax[1].set_xticklabels(a)
+        ax[1].set_xticks(np.arange(-.5,31.5,32/20), minor=True)
+        #trying to add minor ticks
+        #ax[1].xaxis.set_major_locator(MultipleLocator(8))
+#         ax[1].xaxis.set_major_formatter(FormatStrFormatter('%d'))
+#         #ax[1].xaxis.set_minor_locator(MultipleLocator(1.6))
+#         a=ax[1].get_xticks().tolist()
+#         a=['0','0','0.5','1.0','1.5','2.0']
+#         ax[1].set_xticklabels(a)
+        
         ax[1].set_yticks([28.5,28.5-32/7.7,28.5-2*32/7.7,28.5-3*32/7.7,28.5-4*32/7.7,28.5-5*32/7.7,28.5-6*32/7.7,28.5-7*32/7.7])
         a=ax[1].get_yticks().tolist()
         a=['1','2','3','4','5','6','7','8']
