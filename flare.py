@@ -13,6 +13,7 @@ from lmfit.models import GaussianModel
 from numpy import exp, pi, sqrt
 from lmfit import Model
 import scipy.optimize
+import sklearn.utils as sk
 
 #----------------------GAUSSIAN FIT AND GENERAL PLOTTING----------------------
 def gparams(data,inds,offset=0,mags=1,more=False):
@@ -128,7 +129,7 @@ def line(x, slope, intercept):
     """a line"""
     return slope*x + intercept
 
-def gaussline(data,flareinds,ind,guess_out,plot=True,offset=0,mags=1):
+def gaussline(data,flareinds,ind,guess_out,plot=True,offset=0,mags=1,exguess=False):
     x = data['MJD-50000'][flareinds[ind][0]:flareinds[ind][1]]
     #default mag 1 is original data; 5 is detrended
     if mags == 1: imag = data['I mag']
@@ -136,8 +137,11 @@ def gaussline(data,flareinds,ind,guess_out,plot=True,offset=0,mags=1):
     y = offset + np.max(imag[flareinds[ind][0]:flareinds[ind][1]]) - imag[flareinds[ind][0]:flareinds[ind][1]]
     mod = Model(gaussian) + Model(line)
     #using guesses from gaussian model
-    gf = guess_out[ind].best_values #getting guesses from previous fit (just gaussian)
-    amp, cen, wid = gf['amplitude'], gf['center'], gf['sigma']
+    if exguess:
+        amp,cen,wid=guess_out[0],guess_out[1],guess_out[2]
+    else:
+        gf = guess_out[ind].best_values #getting guesses from previous fit (just gaussian)
+        amp, cen, wid = gf['amplitude'], gf['center'], gf['sigma']
     pars = mod.make_params(amp=amp, cen=cen, wid=wid, slope=0, intercept=1)
     pars['amp'].min = 0.0
     #center constrained to be within 30 days of .05 offset center
@@ -168,11 +172,46 @@ def flarehist(centers,refcenters,labels=['detrended','0.06 offset','gaussian+lin
     plt.ylabel('# Flares')
     #returns standard deviation
     return np.nanstd(all_diffs)
+def oneflareg(data,st,end,gline=False,det=False,offset=0):
+    '''Fits gaussian to same flare using different indices
+    data: sog4
+    st: list/array of start indices
+    end: list/array of end indices
+    gtype: boolean for whether or not to use gauss+line model 
+    det: boolean for whether or not to use detrended data
+    
+    Returns list of centers'''
+    cens = np.zeros((len(st),len(end)))
+    for i in range(len(st)):
+        for j in range(len(end)):
+            time = np.array(data['MJD-50000'][st[i]:end[j]])
+            if det: imag = np.array(data['I detrend 2'][st[i]:end[j]])
+            else: imag = np.array(data['I mag'][st[i]:end[j]])
+            if gline:
+                #make sure this guess is reasonable
+                guesscen = np.float(data['MJD-50000'][st[i]]+(data['MJD-50000'][end[j]]-data['MJD-50000'][st[i]])/2)
+                bvs = gaussline(data,[[st[i],end[j]]],0,[5,guesscen,30],offset=offset,plot=False,exguess=True)
+                #bvs = gaussline(data,[[st[i],end[j]]],0,[5,5500,30],offset=offset,plot=False,exguess=True)
+                cens[i][j] = bvs['cen']
+            #regular gaussian, with no offset
+            else:
+                x = time
+                y = np.max(imag) - imag + offset
+                mod = GaussianModel()
+                pars = mod.guess(y, x=x)
+                out = mod.fit(y, pars, x=x)
+                cens[i][j] = out.params['center'].value
+                print('st:',st[i],'end:',end[j],'cen:',cens[i][j])
+    return cens
 
+    
 #----------------------METHODS BELOW NOT UPDATED FOR MODULE YET----------------------
 
-def bootg(ind,st=40,end=130,indiv=False,num=100,offset=0):
-    '''Bootstrap gaussian fit for one flare.'''
+def bootg(data,flareinds,ind,st=40,end=130,indiv=False,num=100,offset=0):
+    '''Bootstrap gaussian fit for one flare.
+    indiv: use individual index arguments (st,end) rather than ind, which then references flareinds
+    num: number of bootstrap iterations
+    offset: gaussian vertical offset'''
     if indiv:
         ind1,ind2 = st,end
     else:
@@ -181,8 +220,8 @@ def bootg(ind,st=40,end=130,indiv=False,num=100,offset=0):
     for i in range(num):
         #bootstrap indices of first flare
         bs = sk.resample(np.arange(ind1,ind2))
-        bst = np.array(sog4['MJD-50000'][bs])
-        bsi = np.array(sog4['I mag'][bs])
+        bst = np.array(data['MJD-50000'][bs])
+        bsi = np.array(data['I mag'][bs])
         x = bst
         #uses original (not detrended) data
         y = np.max(bsi) - bsi + offset
@@ -439,22 +478,22 @@ def plbs(bspks,ind,indiv=False,si=40,ei=132):
 #----------------------SINUSOIDAL FIT----------------------
 def fit_sin(tt, yy):
     '''Fit sin to the input time sequence, and return fitting parameters "amp", "omega", "phase", "offset", "freq", "period" and "fitfunc"'''
-    tt = numpy.array(tt)
-    yy = numpy.array(yy)
-    ff = numpy.fft.fftfreq(len(tt), (tt[1]-tt[0]))   # assume uniform spacing
-    Fyy = abs(numpy.fft.fft(yy))
-    #guess_freq = abs(ff[numpy.argmax(Fyy[1:])+1])   # excluding the zero frequency "peak", which is related to offset
+    tt = np.array(tt)
+    yy = np.array(yy)
+    ff = np.fft.fftfreq(len(tt), (tt[1]-tt[0]))   # assume uniform spacing
+    Fyy = abs(np.fft.fft(yy))
+    #guess_freq = abs(ff[np.argmax(Fyy[1:])+1])   # excluding the zero frequency "peak", which is related to offset
     guess_freq = 1/175.
-    guess_amp = numpy.std(yy) * 2.**0.5
-    guess_offset = numpy.mean(yy)
-    guess = numpy.array([guess_amp, 2.*numpy.pi*guess_freq, 0., guess_offset])
+    guess_amp = np.std(yy) * 2.**0.5
+    guess_offset = np.mean(yy)
+    guess = np.array([guess_amp, 2.*np.pi*guess_freq, 0., guess_offset])
 
-    def sinfunc(t, A, w, p, c):  return A * numpy.sin(w*t + p) + c
+    def sinfunc(t, A, w, p, c):  return A * np.sin(w*t + p) + c
     popt, pcov = scipy.optimize.curve_fit(sinfunc, tt, yy, p0=guess)
     A, w, p, c = popt
-    f = w/(2.*numpy.pi)
-    fitfunc = lambda t: A * numpy.sin(w*t + p) + c
-    return {"amp": A, "omega": w, "phase": p, "offset": c, "freq": f, "period": 1./f, "fitfunc": fitfunc, "maxcov": numpy.max(pcov), "rawres": (guess,popt,pcov)}
+    f = w/(2.*np.pi)
+    fitfunc = lambda t: A * np.sin(w*t + p) + c
+    return {"amp": A, "omega": w, "phase": p, "offset": c, "freq": f, "period": 1./f, "fitfunc": fitfunc, "maxcov": np.max(pcov), "rawres": (guess,popt,pcov)}
 
 def peakplot(ind,plot=True):
     '''Find the flare center using sinusoidal model'''
