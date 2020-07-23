@@ -21,7 +21,7 @@ def readevt(file,ind=1):
     hdu_list = fits.open(file, memmap=True)
     return Table(hdu_list[ind].data)
 
-def phasehist(evt_data,pd,figsize=(8,6),color='slateblue',bins=32):
+def phasehist(evt_data,pd,figsize=(8,6),color='slateblue',bins=32,epoch=0):
     '''
     Plots step histogram of phase
     
@@ -36,7 +36,7 @@ def phasehist(evt_data,pd,figsize=(8,6),color='slateblue',bins=32):
              default (8,6)
     color: matplotlib color of hist
            default slateblue
-    bins: int of bins to use in hist
+    bins: int of total bins to use in hist
           default 32 (16 phase bins)
           
     Outputs:
@@ -46,18 +46,19 @@ def phasehist(evt_data,pd,figsize=(8,6),color='slateblue',bins=32):
     mids: list of phase bin centers
     '''
     plt.figure(figsize=figsize)
-    ph = evt_data['TIME']%pd 
+    ph = (evt_data['TIME']+epoch)%pd 
     ph_1 = ph/pd #divides phase by period so that x-axis goes to 1, not pd
     ph_2 = ph_1+1 
     ph_3 = list(ph_1)+list(ph_2) #duplicates and concatenates 
-    a = plt.hist(ph_3,bins=bins,color='slateblue',histtype='step',label='all')
+    binw = 2./bins
+    a = plt.hist(ph_3,bins=np.arange(0,2.01,binw),color='slateblue',histtype='step',label='all')
     plt.xlim(0,2)
     plt.xlabel('Phase',fontsize=14)
     plt.ylabel('Counts',fontsize=14)
     #constructs list of middle of each phase bin
     mids = []
     for t in range(1,len(a[1])):
-        mids.append(np.mean((a[1][t],a[1][t-1])))
+        mids.append(np.median((a[1][t],a[1][t-1])))
     #adds error as sqrt of counts
     plt.errorbar(mids,a[0],yerr=np.sqrt(a[0]),linestyle='none',color=color)
     #returns histogram (counts and bin boundary arrays), and array of middles of phase bins
@@ -94,13 +95,15 @@ def phasehist_sh(ed,pd,ens=['0.3-10 keV','0.3-1.5 keV','1.5-10 keV'],colors=['sl
         ph_1 = ph/pd
         ph_2 = ph_1+1
         ph_3 = list(ph_1)+list(ph_2)
-        hist = plt.hist(ph_3,bins=bins,color=colors[e],histtype='step',label=ens[e])
+        #define bins with bin width rather than total bin number
+        binw = 2./bins
+        hist = plt.hist(ph_3,bins=np.arange(0,2.01,binw),color=colors[e],histtype='step',label=ens[e])
         hists.append(hist)
         
         if e == 0:
             mids = []
             for t in range(1,len(hist[1])):
-                mids.append(np.mean((hist[1][t],hist[1][t-1])))
+                mids.append(np.median((hist[1][t],hist[1][t-1])))
         plt.errorbar(mids,hist[0],yerr=np.sqrt(hist[0]),linestyle='none',color=colors[e])
 
     plt.xlim(0,2)
@@ -233,14 +236,6 @@ def phaserate(hists,mids,exptime,bgb=False,bg=[],ens=['0.3-10 keV','S: 0.3-1.5 k
         a=['','','','','']
         ax[0].set_xticklabels(a)
         ax[0].set_xticks(np.arange(-.5,31.5,32/20), minor=True)
-        #trying to add minor ticks
-        #ax[1].xaxis.set_major_locator(MultipleLocator(8))
-#         ax[1].xaxis.set_major_formatter(FormatStrFormatter('%d'))
-#         #ax[1].xaxis.set_minor_locator(MultipleLocator(1.6))
-#         a=ax[1].get_xticks().tolist()
-#         a=['0','0','0.5','1.0','1.5','2.0']
-#         ax[1].set_xticklabels(a)
-        
         ax[0].set_yticks([28.5,28.5-32/7.7,28.5-2*32/7.7,28.5-3*32/7.7,28.5-4*32/7.7,28.5-5*32/7.7,28.5-6*32/7.7,28.5-7*32/7.7])
         a=ax[0].get_yticks().tolist()
         a=['1','2','3','4','5','6','7','8']
@@ -266,7 +261,7 @@ def phaserate(hists,mids,exptime,bgb=False,bg=[],ens=['0.3-10 keV','S: 0.3-1.5 k
     return ratehists,errs
 
 
-def s_phaserate(hist,mids,exptime,color='slateblue',bins=16): #16 bins means 16 phase bins (32 total)
+def s_phaserate(hist,mids,exptime,color='slateblue',bins=16,label='',scale=1): #16 bins means 16 phase bins (32 total)
     '''
     Plots single phase-folded step hist, with count rate on y-axis
     
@@ -286,10 +281,10 @@ def s_phaserate(hist,mids,exptime,color='slateblue',bins=16): #16 bins means 16 
     hist
     err
     '''
-    counts = hist[0] #array of counts in each bin
+    counts = hist[0]*scale #array of counts in each bin multiplied by optional scale factor
     binb = hist[1] #array of bin boundaries
     cr = counts*bins/exptime
-    hist = plt.hist(binb[:-1],binb,weights=cr,color=color,histtype='step')
+    hist = plt.hist(binb[:-1],binb,weights=cr,color=color,histtype='step',label=label)
     err = np.sqrt(counts)*bins/exptime
     plt.errorbar(mids,cr,yerr=err,color=color,linestyle='none')
     plt.xlim(0,2)
@@ -349,7 +344,7 @@ def binpi(evt_data,secs=10):
         if evt_data['TIME'][e]-evt_data['TIME'][bins[c]]>secs:
             c+=1
             bins.append(e)
-            times.append(np.mean((evt_data['TIME'][e-1],evt_data['TIME'][bins[-2]])))
+            times.append(np.median((evt_data['TIME'][e-1],evt_data['TIME'][bins[-2]])))
     counts = []
     for b in range(1,len(bins)):
         counts.append(bins[b]-bins[b-1])
