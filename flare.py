@@ -14,6 +14,8 @@ from numpy import exp, pi, sqrt
 from lmfit import Model
 import scipy.optimize
 import sklearn.utils as sk
+from scipy.optimize import curve_fit
+
 
 #----------------------GAUSSIAN FIT AND GENERAL PLOTTING----------------------
 def gparams(data,inds,offset=0,mags=1,more=False):
@@ -118,8 +120,6 @@ def plflares(result,cens,inds,data,offset=0,modcolor='navy',cs = ['navy','cornfl
     
 
 
-
-
 def gaussian(x, amp, cen, wid):
     """1-d gaussian: gaussian(x, amp, cen, wid)"""
     return (amp / (sqrt(2*pi) * wid)) * exp(-(x-cen)**2 / (2*wid**2))
@@ -129,7 +129,7 @@ def line(x, slope, intercept):
     """a line"""
     return slope*x + intercept
 
-def gaussline(data,flareinds,ind,guess_out,plot=True,offset=0,mags=1,exguess=False):
+def gaussline(data,flareinds,ind,guess_out,plot=True,offset=0,mags=1,exguess=False,more=False):
     x = data['MJD-50000'][flareinds[ind][0]:flareinds[ind][1]]
     #default mag 1 is original data; 5 is detrended
     if mags == 1: imag = data['I mag']
@@ -157,11 +157,12 @@ def gaussline(data,flareinds,ind,guess_out,plot=True,offset=0,mags=1,exguess=Fal
         plt.axvline(result.best_values['cen'],color='black')
         plt.legend(loc='best')
         plt.show()
-    return result.best_values
+    if more: return result
+    else: return result.best_values
 
-def flarehist(centers,refcenters,labels=['detrended','0.06 offset','gaussian+line','det gaussian+line'],bins=[-20,-15,-10,-5,0,5,10,15,20],
+def flarehist(centers,refcenters,labels=['detrended','0.06 offset','gaussian+line','det gaussian+line','triangle'],bins=[-20,-15,-10,-5,0,5,10,15,20],
               colors=['navy','palevioletred','forestgreen','maroon','salmon','gold'],
-              linestyles=['solid','dashed','dotted','-.']):
+              linestyles=['solid','dashed','dotted','-.',(0, (5, 10))]):
     all_diffs = []
     for c in range(len(centers)):
         diff = centers[c] - refcenters
@@ -205,7 +206,6 @@ def oneflareg(data,st,end,gline=False,det=False,offset=0):
     return cens
 
     
-#----------------------METHODS BELOW NOT UPDATED FOR MODULE YET----------------------
 
 def bootg(data,flareinds,ind,st=40,end=130,indiv=False,num=100,offset=0):
     '''Bootstrap gaussian fit for one flare.
@@ -247,7 +247,8 @@ def bootg(data,flareinds,ind,st=40,end=130,indiv=False,num=100,offset=0):
 def triangle(x,s1,i1,s2,i2,findpk=False):
     '''
     Triangle function using two line slopes and two intercepts.
-    Assumes first slope is positive, second is negative'''
+    Assumes first slope is positive, second is negative
+    To do: return y's using linspace rather than x data'''
     #y1 = s1*x + i1
     #y2 = s2*x + i2
     #find intersection point -- x value where y1 = y2
@@ -263,8 +264,10 @@ def triangle(x,s1,i1,s2,i2,findpk=False):
     else: return y
 
 
-def triangfit(ind,cut1=0,cut2=0,div=0,mult=False,off=False,rs=[],stcut=False,plot=True,chis=False):
+def triangfit(sog4,flareinds,ind,cut1=0,cut2=0,div=0,mult=False,off=False,rs=[],stcut=False,plot=True,chis=False,params=False):
     '''Fit triangle to flare.
+    sog4: data
+    flareinds
     mult: boolean to use multiple initial fits
     rs: range of div to pass in
     off: boolean for rs to be different index cutoffs (more or less data used)
@@ -275,6 +278,7 @@ def triangfit(ind,cut1=0,cut2=0,div=0,mult=False,off=False,rs=[],stcut=False,plo
     st = flareinds[ind][0]+cut1
     end = flareinds[ind][1]-cut2
     x = sog4['MJD-50000'][st:end]
+    newx = np.linspace(np.min(x),np.max(x)+1)
     y = sog4['I mag'][st:end]
     yerr = sog4['I mag err'][st:end]
     if plot: plt.scatter(x,y,color='cornflowerblue')
@@ -312,51 +316,63 @@ def triangfit(ind,cut1=0,cut2=0,div=0,mult=False,off=False,rs=[],stcut=False,plo
                 lin1 = np.polyfit(x[:split-r],y[:split-r], 1)
                 #print(st+split-r) confirmed that the above line maintained the point of split
                 lin2 = np.polyfit(x[split-r:],y[split-r:], 1)
-            if plot: plt.plot(x,triangle(x,lin1[0],lin1[1],lin2[0],lin2[1]),color='navy',linestyle='dotted')
+            if plot: plt.plot(newx,triangle(newx,lin1[0],lin1[1],lin2[0],lin2[1]),color='navy',linestyle='dotted')
             #improve fit using curve_fit
             iv = [lin1[0],lin1[1],lin2[0],lin2[1]]  # for slope1, int1, slope2, int2
             #print(iv)
             bvs, covar = curve_fit(triangle, x, y, p0=iv)
-            b_fit,bpk = triangle(x,bvs[0],bvs[1],bvs[2],bvs[3],findpk=True)
+            #using one point per day instead of x data
+            b_fit,bpk = triangle(newx,bvs[0],bvs[1],bvs[2],bvs[3],findpk=True)
+            b_fity = triangle(x,bvs[0],bvs[1],bvs[2],bvs[3])
             #print(bpk)
             pks.append(bpk)
-            if plot: plt.plot(x,b_fit,color='darkseagreen')
+            if plot: plt.plot(newx,b_fit,color='darkseagreen')
             #plt.legend()
             if chis:
-                chi = np.sum((np.array(y)-np.array(b_fit))**2/(yerr**2))
+                chi = np.sum((np.array(y)-np.array(b_fity))**2/(yerr**2))
                 chi2.append(chi)
                 #also add reduced chi squared since different numbers of points used if off
                 rchi2.append(chi/(len(x)-4))
         if plot:
-            plt.plot(x,triangle(x,lin1[0],lin1[1],lin2[0],lin2[1]),color='navy',linestyle='dotted',label='initial fit')
-            plt.plot(x,b_fit,color='darkseagreen',label='best fit')
+            plt.plot(newx,triangle(newx,lin1[0],lin1[1],lin2[0],lin2[1]),color='navy',linestyle='dotted',label='initial fit')
+            plt.plot(newx,b_fit,color='darkseagreen',label='best fit')
             plt.ylim(np.max(y)+.02,np.min(y)-.02)
- 
+            plt.xlabel('MJD-50000')
+            plt.ylabel('I mag')
             plt.legend()
         if chis: return pks,chi2,rchi2
+
         else: return pks
     else:
         split = int(div+(end-st)/2)
         lin1 = np.polyfit(x[:split],y[:split], 1)
         lin2 = np.polyfit(x[split:],y[split:], 1)
         #plt.scatter(x,y)
-        if plot: plt.plot(x,triangle(x,lin1[0],lin1[1],lin2[0],lin2[1]),color='navy',label='initial fit',linestyle='dotted')
+        if plot: plt.plot(newx,triangle(newx,lin1[0],lin1[1],lin2[0],lin2[1]),color='navy',label='initial fit',linestyle='dotted')
         #improve fit using curve_fit
         iv = [lin1[0],lin1[1],lin2[0],lin2[1]]  # for slope1, int1, slope2, int2
         bvs, covar = curve_fit(triangle, x, y, p0=iv)
-        b_fit,bpk = triangle(x,bvs[0],bvs[1],bvs[2],bvs[3],findpk=True)
+        #fit for each day in range
+        b_fit,bpk = triangle(newx,bvs[0],bvs[1],bvs[2],bvs[3],findpk=True)
+        #fit for each data point
+        b_fity = triangle(x,bvs[0],bvs[1],bvs[2],bvs[3])
+        if ind == 2:
+            print(bvs)
+            print(bpk)
         if plot:
-            plt.plot(x,b_fit,color='darkseagreen',label='best fit')
+            plt.plot(newx,b_fit,color='darkseagreen',label='best fit')
             plt.legend()
             plt.ylim(np.max(y)+.02,np.min(y)-.02)
+            plt.xlabel('MJD-50000')
+            plt.ylabel('I mag')
         if chis:
-            chi = np.sum((np.array(y)-np.array(b_fit))**2/(yerr**2))
+            chi = np.sum((np.array(y)-np.array(b_fity))**2/(yerr**2))
             rchi = (chi/(len(x)-4)) #four triangle params
             return bpk, chi, rchi
+        elif params: return bpk,newx,b_fit
         else: return bpk
         
-        
-def tri3D(ind,cut1=np.arange(-2,2),cut2=np.arange(-2,2),div=np.arange(-2,2)):
+def tri3D(sog4,flareinds,ind,cut1=np.arange(-2,2),cut2=np.arange(-2,2),div=np.arange(-2,2)):
     '''
     cut1 cuts data from the start
             assumes symmetrical range around 0 with length equal to variable cut1
@@ -376,12 +392,12 @@ def tri3D(ind,cut1=np.arange(-2,2),cut2=np.arange(-2,2),div=np.arange(-2,2)):
     for i in cut1:
         for j in cut2:
             for k in div:   
-                cen,chi,rchi = triangfit(ind,cut1=i,cut2=j,div=k,chis=True,plot=False)
+                cen,chi,rchi = triangfit(sog4,flareinds,ind,cut1=i,cut2=j,div=k,chis=True,plot=False)
                 #set index zero point to lowest value
                 flarr[i-minc1][j-minc2][k-mindiv] = cen
                 flarr_r[i-minc1][j-minc2][k-mindiv] = rchi
     return flarr, flarr_r
-def tripl(ind,flarr,flarr_r,cut1=np.arange(-2,2),cut2=np.arange(-2,2)):
+def tripl(sog4,flareinds,ind,flarr,flarr_r,cut1=np.arange(-2,2),cut2=np.arange(-2,2)):
     st = flareinds[ind][0] #original start
     end = flareinds[ind][1] #original end
     #plots minimum used 
@@ -402,14 +418,15 @@ def tripl(ind,flarr,flarr_r,cut1=np.arange(-2,2),cut2=np.arange(-2,2)):
     plt.axvline(lowcen)
     plt.ylim(np.max(sog4['I mag'][st:end])+.02,np.min(sog4['I mag'][st:end])-.02)
     return lowcen
-def tp(ind,cut1=np.arange(-2,2),cut2=np.arange(-2,2),div=np.arange(-2,2)):
+def tp(sog4,flareinds,ind,cut1=np.arange(-2,2),cut2=np.arange(-2,2),div=np.arange(-2,2)):
     '''
     Does both tri3D and tripl'''
-    flarr,flarr_r = tri3D(ind,cut1=cut1,cut2=cut2,div=div)
-    lowcen = tripl(ind,flarr,flarr_r,cut1=cut1,cut2=cut2)
+    flarr,flarr_r = tri3D(sog4,flareinds,ind,cut1=cut1,cut2=cut2,div=div)
+    lowcen = tripl(sog4,flareinds,ind,flarr,flarr_r,cut1=cut1,cut2=cut2)
     return flarr,flarr_r,lowcen
+       
 
-def bstri(ind,indiv=False,si=40,ei=130,num=1000,sp_off=0): #allows you to use flarinds or custom indices
+def bstri(sog4,flareinds,ind,indiv=False,si=40,ei=130,num=1000,sp_off=0): #allows you to use flarinds or custom indices
     '''Bootstrap triangular fit'''
     bspks = []
     #use same split throughout
@@ -457,7 +474,7 @@ def bstri(ind,indiv=False,si=40,ei=130,num=1000,sp_off=0): #allows you to use fl
         b_fit,bpk = triangle(t,bvs[0],bvs[1],bvs[2],bvs[3],findpk=True)
         bspks.append(bpk)
     return bspks
-def plbs(bspks,ind,indiv=False,si=40,ei=132):
+def plbs(sog4,flareinds,bspks,ind,indiv=False,si=40,ei=132):
     if indiv:
         ind1 = si
         ind2 = ei
@@ -475,9 +492,10 @@ def plbs(bspks,ind,indiv=False,si=40,ei=132):
     ax[0].set_ylim(np.max(imag)+.02,np.min(imag)-.02)
     return
 
-#----------------------SINUSOIDAL FIT----------------------
+#----------------------SINUSOIDAL FIT; updated----------------------
 def fit_sin(tt, yy):
-    '''Fit sin to the input time sequence, and return fitting parameters "amp", "omega", "phase", "offset", "freq", "period" and "fitfunc"'''
+    '''Fit sin to the input time sequence, and return fitting parameters "amp", "omega", "phase", "offset", "freq", "period" and "fitfunc"
+    Founds this function online'''
     tt = np.array(tt)
     yy = np.array(yy)
     ff = np.fft.fftfreq(len(tt), (tt[1]-tt[0]))   # assume uniform spacing
@@ -495,17 +513,21 @@ def fit_sin(tt, yy):
     fitfunc = lambda t: A * np.sin(w*t + p) + c
     return {"amp": A, "omega": w, "phase": p, "offset": c, "freq": f, "period": 1./f, "fitfunc": fitfunc, "maxcov": np.max(pcov), "rawres": (guess,popt,pcov)}
 
-def peakplot(ind,plot=True):
-    '''Find the flare center using sinusoidal model'''
+def peakplot(data,flareinds,mods,ind,plot=True):
+    '''Find the flare center using sinusoidal model
+    mods: sine models'''
     st = flareinds[ind][0]
     end = flareinds[ind][1]
-    stdate = int(sog4['MJD-50000'][st:st+1])
-    enddate = int(sog4['MJD-50000'][end-1:end])
+    stdate = int(data['MJD-50000'][st:st+1])
+    enddate = int(data['MJD-50000'][end-1:end])
     ff = np.arange(stdate,enddate,.1)
-    pk = scipy.signal.find_peaks(-1*sinmods[ind]["fitfunc"](ff))[0]
+    pk = scipy.signal.find_peaks(-1*mods[ind]["fitfunc"](ff))[0]
     if plot:
-        plt.scatter(sog4['MJD-50000'][st:end],sog4['I mag'][st:end],color='navy')
-        plt.plot(np.linspace(stdate,enddate),sinmods[ind]["fitfunc"](np.linspace(stdate,enddate)))
-        plt.ylim(np.max(sog4['I mag'][st:end])+.02,np.min(sog4['I mag'][st:end])-.02)
+        plt.scatter(data['MJD-50000'][st:end],data['I mag'][st:end],color='navy')
+        plt.plot(np.linspace(stdate,enddate),mods[ind]["fitfunc"](np.linspace(stdate,enddate)))
+        plt.ylim(np.max(data['I mag'][st:end])+.02,np.min(data['I mag'][st:end])-.02)
         plt.axvline(ff[pk])
-    return ff[pk] #returns center
+    return np.float(ff[pk]) #returns center
+
+
+#----------------------METHODS BELOW NOT UPDATED FOR MODULE YET---------------------- 
