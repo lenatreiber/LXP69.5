@@ -21,9 +21,22 @@ from scipy.optimize import curve_fit
 def gparams(data,inds,offset=0,mags=1,more=False):
     '''
     Fits Gaussian to each of 13 flares. 
-    Uses offset argument to add to the difference between
-    the flare's mag maximum and the data. 
-    mags is ind of I data to use; 1 is original, 5 is detrended
+    Inputs:
+    -------
+    data: DataFrame with 'MJD-50000' and 'I mag' columns (sog4 in notebook)
+    inds: list of lists of index bounds of flares to fit (flareinds in notebook)
+    offset: add to the difference between the flare's mag maximum and the data (default 0) 
+    mags: ind of I data to use; 1 is original, 5 is detrended
+    more: if True, returns both list of fitting results and DataFrame of best-fit parameters for each flare
+        default False, returning just the DataFrame
+    
+    Outputs:
+    --------
+    if more:
+        gouts: list of model results
+        ggfits: DataFrame with one row per flare, including the best fit parameter values
+    else:
+        ggfits
     '''
     gouts = []
     for f in range(len(inds)):   
@@ -55,8 +68,12 @@ def gparams(data,inds,offset=0,mags=1,more=False):
     else: return ggfits
     
 def plotrel(gfl,colors=['navy','cornflowerblue','rebeccapurple','palevioletred','darkseagreen']): #gaussian fit list
-    '''Plots relations between Gaussian model quantities.
-    gfl: list of DataFrames with center, height, fwhm, amp'''
+    '''Plots relations in scatter subplots between Gaussian model quantities.
+    Inputs:
+    -------
+    gfl: list of DataFrames with center, height, fwhm, amp
+    colors: list of colors to use for each DataFrame in gfl; must be at least the same length
+    '''
     fig3 = plt.figure(constrained_layout=True,figsize=(11,9))
     gs = fig3.add_gridspec(3, 3)
     ax1 = fig3.add_subplot(gs[0, 0])
@@ -90,15 +107,29 @@ def plotrel(gfl,colors=['navy','cornflowerblue','rebeccapurple','palevioletred',
     
 def plflares(result,cens,inds,data,offset=0,modcolor='navy',cs = ['navy','cornflowerblue','rebeccapurple','palevioletred','darkseagreen','forestgreen','maroon','salmon','gold'],label=False,labels=[''],ylabel='I max mag - I mag + offset'):
     '''
+    Plots 13 flares with one model and multiple centers shown.
+    
+    Inputs: 
+    -------
     result: list of outputs from gaussian model to be shown
     cens: centers to plot as vertical lines
-    inds: index bounds of flares (flareinds)'''
+    inds: index bounds of flares (flareinds)
+    data: DataFrame for plotting (sog4)
+    offset: vertical offset from max I mag - I mag to use in plotting
+    modcolor: color of model curve
+    cs: colors of cens
+    label: whether to label different center lists (default False)
+    labels: list of strings to use for labels; same order as cens
+    ylabel: label for y-axis
+    '''
     fig = plt.figure(constrained_layout=True,figsize=(18,10))
     gs = fig.add_gridspec(3,6)
     
     for f in range(13):
         if f < 6: axt = fig.add_subplot(gs[0, f])
+        #second row of plots
         elif f < 12: axt = fig.add_subplot(gs[1, f-6])
+        #final flare in third row
         else: axt = fig.add_subplot(gs[2, f-12])
         st = inds[f][0]
         end = inds[f][1]
@@ -109,19 +140,19 @@ def plflares(result,cens,inds,data,offset=0,modcolor='navy',cs = ['navy','cornfl
         xfits = np.linspace(enddate,stdate,enddate-stdate)
         bfit = gaussian(xfits,result[f].best_values['amplitude'],result[f].best_values['center'],result[f].best_values['sigma'])
         axt.plot(xfits,bfit,color=modcolor) 
-
+        
         for i in range(len(cens)): #len(cens) is number of models of centers to plot
             if label: axt.axvline(cens[i][f],color=cs[i],label=labels[i])
             else: axt.axvline(cens[i][f],color=cs[i])
         
-        if f== 0 and label: axt.legend()
+        if f == 0 and label: axt.legend()
     axt.set_ylabel(ylabel,fontsize=16)
     axt.set_xlabel('MJD-50000',fontsize=16)
     
 
 
 def gaussian(x, amp, cen, wid):
-    """1-d gaussian: gaussian(x, amp, cen, wid)"""
+    """1-d gaussian: gaussian(x, amp, cen, wid) from lmfits"""
     return (amp / (sqrt(2*pi) * wid)) * exp(-(x-cen)**2 / (2*wid**2))
 
 
@@ -130,6 +161,25 @@ def line(x, slope, intercept):
     return slope*x + intercept
 
 def gaussline(data,flareinds,ind,guess_out,plot=True,offset=0,mags=1,exguess=False,more=False):
+    '''
+    Fits gaussian+line composite model to the 13 flares.
+    Inputs:
+    -------
+    data: sog4
+    flareinds: flareinds
+    ind: index of flare in flareinds to fit
+    guess_out: gaussian output to use as a guess for the amp, cen, and wid
+    plot: default True -- plots best fit on flare data
+    offset: vertical offset 
+    mags: original or detrended data (defaultt 1 for original data)
+    exguess: default False; make True if guess_out is list of guess parameters rather than gaussian result
+    more: returns result rather than best parameter values if True (default False)
+    
+    Output:
+    -------
+    if more: returns fit result
+    else: returns best fit cen, amp, and wid
+    '''
     x = data['MJD-50000'][flareinds[ind][0]:flareinds[ind][1]]
     #default mag 1 is original data; 5 is detrended
     if mags == 1: imag = data['I mag']
@@ -147,12 +197,13 @@ def gaussline(data,flareinds,ind,guess_out,plot=True,offset=0,mags=1,exguess=Fal
     #center constrained to be within 30 days of .05 offset center
     pars['cen'].min = cen-30
     pars['cen'].max = cen+30
+    #positive width
     pars['wid'].min = 0.0
 
     result = mod.fit(y, pars, x=x)
     if plot:
         plt.plot(x, y, 'bo')
-        #plt.plot(x, result.init_fit, 'k--', label='initial fit')
+        #plot best fit model and center
         plt.plot(x, result.best_fit, 'r-', label='best fit')
         plt.axvline(result.best_values['cen'],color='black')
         plt.legend(loc='best')
@@ -163,9 +214,20 @@ def gaussline(data,flareinds,ind,guess_out,plot=True,offset=0,mags=1,exguess=Fal
 def flarehist(centers,refcenters,labels=['detrended','0.06 offset','gaussian+line','det gaussian+line','triangle'],bins=[-20,-15,-10,-5,0,5,10,15,20],
               colors=['navy','palevioletred','forestgreen','maroon','salmon','gold'],
               linestyles=['solid','dashed','dotted','-.',(0, (5, 10))]):
+    '''
+    Plots step histogram of the difference between input centers and a list of reference centers.
+    Inputs:
+    -------
+    centers: list of list of centers for each flare
+    refcenters: reference centers to subtract (equal length to a given list element of centers)
+    labels: labels in same order as centers
+    bins: bin bounds
+    colors: colors to use in histogram
+    linestyles: linestyles to use in hist
+    '''
     all_diffs = []
     for c in range(len(centers)):
-        diff = centers[c] - refcenters
+        diff = centers[c] - np.array(refcenters)
         all_diffs.append(diff)
         a = plt.hist(centers[c] - refcenters,label=labels[c],bins=bins,histtype='step',color=colors[c],linestyle=linestyles[c],alpha=.7)
     plt.legend(loc='upper left')
@@ -173,14 +235,15 @@ def flarehist(centers,refcenters,labels=['detrended','0.06 offset','gaussian+lin
     plt.ylabel('# Flares')
     #returns standard deviation
     return np.nanstd(all_diffs)
+
 def oneflareg(data,st,end,gline=False,det=False,offset=0):
     '''Fits gaussian to same flare using different indices
     data: sog4
     st: list/array of start indices
     end: list/array of end indices
-    gtype: boolean for whether or not to use gauss+line model 
-    det: boolean for whether or not to use detrended data
-    
+    gline: boolean for whether or not to use gauss+line model (default False)
+    det: boolean for whether or not to use detrended data (default False)
+    offset: vertical offset for fitting (default 0)
     Returns list of centers'''
     cens = np.zeros((len(st),len(end)))
     for i in range(len(st)):
@@ -209,9 +272,22 @@ def oneflareg(data,st,end,gline=False,det=False,offset=0):
 
 def bootg(data,flareinds,ind,st=40,end=130,indiv=False,num=100,offset=0):
     '''Bootstrap gaussian fit for one flare.
-    indiv: use individual index arguments (st,end) rather than ind, which then references flareinds
-    num: number of bootstrap iterations
-    offset: gaussian vertical offset'''
+    Inputs:
+    -------
+    data: sog4
+    flareinds: flareinds
+    ind: index of flare to bootstrap (used to get inds from flareinds if indiv False)
+    st: used as start index if indiv True
+    end: used as end index if indiv True
+    indiv: use individual index arguments (st,end) rather than ind, which then references flareinds (default False)
+    num: number of bootstrap iterations (default 100)
+    offset: gaussian vertical offset
+    
+    Outputs:
+    --------
+    bsouts: list of bootstrap model results
+    bsfits: DataFrame with parameters from each bootstrap iteration 
+    '''
     if indiv:
         ind1,ind2 = st,end
     else:
@@ -247,8 +323,19 @@ def bootg(data,flareinds,ind,st=40,end=130,indiv=False,num=100,offset=0):
 def triangle(x,s1,i1,s2,i2,findpk=False):
     '''
     Triangle function using two line slopes and two intercepts.
-    Assumes first slope is positive, second is negative
-    To do: return y's using linspace rather than x data'''
+    Inputs:
+    ------
+    x: array or list of x values passed into triangle function
+    s1: slope of first line
+    i1: intercept of first line
+    s2: slope of second line
+    i2: intercept of second line
+    findpk: whether to return peak (intersection of two lines); default False
+    Outputs:
+    --------
+    if findpk: returns y values and the x location of the peak
+    else: returns y values in array
+    '''
     #y1 = s1*x + i1
     #y2 = s2*x + i2
     #find intersection point -- x value where y1 = y2
@@ -265,16 +352,32 @@ def triangle(x,s1,i1,s2,i2,findpk=False):
 
 
 def triangfit(sog4,flareinds,ind,cut1=0,cut2=0,div=0,mult=False,off=False,rs=[],stcut=False,plot=True,chis=False,params=False):
-    '''Fit triangle to flare.
-    sog4: data
+    '''Fit triangle(s) to flare.
+    Inputs:
+    -------
+    sog4
     flareinds
-    mult: boolean to use multiple initial fits
+    ind: index of flare (within flareinds)
+    cut1: number of data points to cut (or add if negative) from start
+    cut2: number of data points to cut (or add if negative) from end
+    div: index shift for split point for intitial fit (positive to move right)
+    mult: boolean to use multiple initial fits (default False)
     rs: range of div to pass in
     off: boolean for rs to be different index cutoffs (more or less data used)
     stcut: boolean for rs to cut points from flare start rather than end
     plot: boolean for plotting; default True
-    chis: boolean for returning chi-squared value(s); default to False'''
-    #cutoff allows you to decrease the point involved 
+    chis: boolean for returning chi-squared value(s); default to False
+    params: boolean to return best fit triangle parameters; default False
+    
+    Outputs:
+    --------
+    if more and chis: peaks, chi-squared values, and reduced chi-squared values
+    elif chis: best fit peak, chi-squared, and reduced chi-squared 
+    elif more and params: best fit peaks, newx (x values spaced by a day), best fit parameters
+    else: returns peak(s)
+    
+    To Do: allow for return of both chis and params'''
+    #cutoff allows you to change the number of the points used in fit 
     st = flareinds[ind][0]+cut1
     end = flareinds[ind][1]-cut2
     x = sog4['MJD-50000'][st:end]
@@ -374,10 +477,19 @@ def triangfit(sog4,flareinds,ind,cut1=0,cut2=0,div=0,mult=False,off=False,rs=[],
         
 def tri3D(sog4,flareinds,ind,cut1=np.arange(-2,2),cut2=np.arange(-2,2),div=np.arange(-2,2)):
     '''
-    cut1 cuts data from the start
-            assumes symmetrical range around 0 with length equal to variable cut1
-    cut2 cuts data from end
-    div changes location of split for initial fit
+    Inputs:
+    -------
+    sog4
+    flareinds
+    ind: index of flare in flareinds
+    cut1: list or array of numbers of data points to try cutting (if positive) or adding to start of flare
+    cut2: list or array of numbers of data points to try cutting (if positive) or adding to end of flare
+    div: list or array of values to try adding or subtracting from default split index for initial fit
+    
+    Outputs:
+    --------
+    flarr: 3D array of best fit centers (where i,j,k are cut1,cut2, and div)
+    flarr_r: reduced chi squared values for fits with each parameter combination
     '''
     flarr = np.zeros((len(cut1),len(cut2),len(div)))
     flarr_r = np.zeros((len(cut1),len(cut2),len(div)))
@@ -398,6 +510,19 @@ def tri3D(sog4,flareinds,ind,cut1=np.arange(-2,2),cut2=np.arange(-2,2),div=np.ar
                 flarr_r[i-minc1][j-minc2][k-mindiv] = rchi
     return flarr, flarr_r
 def tripl(sog4,flareinds,ind,flarr,flarr_r,cut1=np.arange(-2,2),cut2=np.arange(-2,2)):
+    '''
+    Plots span of results from tri3D on scatter plot of flare, with line at fit with lowest reduced chi-squared.
+    Inputs:
+    -------
+    sog4
+    flareinds
+    ind
+    flarr,flarr_r: returns from tri3D
+    cut1,cut2: arrays used for cut1 and cut2 in tri3D
+    Output:
+    -------
+    center value with lowest reduced chi-squared
+    '''
     st = flareinds[ind][0] #original start
     end = flareinds[ind][1] #original end
     #plots minimum used 
@@ -418,16 +543,34 @@ def tripl(sog4,flareinds,ind,flarr,flarr_r,cut1=np.arange(-2,2),cut2=np.arange(-
     plt.axvline(lowcen)
     plt.ylim(np.max(sog4['I mag'][st:end])+.02,np.min(sog4['I mag'][st:end])-.02)
     return lowcen
+
 def tp(sog4,flareinds,ind,cut1=np.arange(-2,2),cut2=np.arange(-2,2),div=np.arange(-2,2)):
     '''
-    Does both tri3D and tripl'''
+    Executes both tri3D and tripl.
+    '''
     flarr,flarr_r = tri3D(sog4,flareinds,ind,cut1=cut1,cut2=cut2,div=div)
     lowcen = tripl(sog4,flareinds,ind,flarr,flarr_r,cut1=cut1,cut2=cut2)
     return flarr,flarr_r,lowcen
        
 
 def bstri(sog4,flareinds,ind,indiv=False,si=40,ei=130,num=1000,sp_off=0): #allows you to use flarinds or custom indices
-    '''Bootstrap triangular fit'''
+    '''
+    Bootstrap triangular fit.
+    Inputs:
+    -------
+    sog4
+    flareinds
+    ind
+    indiv: use individual index arguments (st,end) rather than ind, which then references flareinds (default False)
+    st: used as start index if indiv True
+    end: used as end index if indiv True
+    num: number of bootstrap iterations (default 1000)
+    sp_off: same as div; by how many indices to move initial split (default 0)
+    
+    Output:
+    -------
+    bspks: bootstrap centers
+    '''
     bspks = []
     #use same split throughout
     if indiv:
@@ -449,21 +592,10 @@ def bstri(sog4,flareinds,ind,indiv=False,si=40,ei=130,num=1000,sp_off=0): #allow
     iv = [lin1[0],lin1[1],lin2[0],lin2[1]]  # for slope1, int1, slope2, int2
     #find indices in flare -- not just st to end
     for i in range(num):
-        #arrays for bootstrapped times and I mag
-        #bst = np.zeros((92))
-        #bsi = np.zeros((92))
-        #bootstrap indices of first flare
         bs = sk.resample(np.arange(ind1,ind2))
         #have to use full dataframe indexing for next two lines to work
         bst = np.array(sog4['MJD-50000'][bs])
         bsi = np.array(sog4['I mag'][bs])
-        #filling with for loop insead
-#         for b in range(len(bs)):
-#              bst[b] = float(t[bs[b]:bs[b]+1])
-#             bsi[b] = float(m[bs[b]:bs[b]+1])
-#             bst.append(float(t[bs[b]:bs[b]+1]))
-#             bsi.append(float(m[bs[b]:bs[b]+1]))
-        #sort by time
         bsf = pd.DataFrame(columns=['t','i'])
         bsf['t'] = bst
         bsf['i'] = bsi
@@ -474,7 +606,20 @@ def bstri(sog4,flareinds,ind,indiv=False,si=40,ei=130,num=1000,sp_off=0): #allow
         b_fit,bpk = triangle(t,bvs[0],bvs[1],bvs[2],bvs[3],findpk=True)
         bspks.append(bpk)
     return bspks
+
 def plbs(sog4,flareinds,bspks,ind,indiv=False,si=40,ei=132):
+    '''
+    Plot bootstrap span of results and hist.
+    Inputs:
+    -------
+    sog4
+    flareinds
+    bspks: output of bstri (list of bootstrap results)
+    ind: index in flareinds of flare
+    indiv: use individual index arguments (st,end) rather than ind, which then references flareinds (default False)
+    st: used as start index if indiv True
+    end: used as end index if indiv True    
+    '''
     if indiv:
         ind1 = si
         ind2 = ei
@@ -495,7 +640,7 @@ def plbs(sog4,flareinds,bspks,ind,indiv=False,si=40,ei=132):
 #----------------------SINUSOIDAL FIT; updated----------------------
 def fit_sin(tt, yy):
     '''Fit sin to the input time sequence, and return fitting parameters "amp", "omega", "phase", "offset", "freq", "period" and "fitfunc"
-    Founds this function online'''
+    Found this function online'''
     tt = np.array(tt)
     yy = np.array(yy)
     ff = np.fft.fftfreq(len(tt), (tt[1]-tt[0]))   # assume uniform spacing
@@ -514,8 +659,18 @@ def fit_sin(tt, yy):
     return {"amp": A, "omega": w, "phase": p, "offset": c, "freq": f, "period": 1./f, "fitfunc": fitfunc, "maxcov": np.max(pcov), "rawres": (guess,popt,pcov)}
 
 def peakplot(data,flareinds,mods,ind,plot=True):
-    '''Find the flare center using sinusoidal model
-    mods: sine models'''
+    '''Find the flare center using sinusoidal model.
+    Inputs:
+    -------
+    data: sog4
+    flareinds
+    mods: sine models
+    ind: index of flare in flareinds
+    plot: whether to plot flare and sine model (default True)
+    Output:
+    -------
+    peak of sine model
+    '''
     st = flareinds[ind][0]
     end = flareinds[ind][1]
     stdate = int(data['MJD-50000'][st:st+1])
@@ -530,4 +685,3 @@ def peakplot(data,flareinds,mods,ind,plot=True):
     return np.float(ff[pk]) #returns center
 
 
-#----------------------METHODS BELOW NOT UPDATED FOR MODULE YET---------------------- 
