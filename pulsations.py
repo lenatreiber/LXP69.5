@@ -115,7 +115,7 @@ def phasehist_sh(ed,pd,ens=['0.3-10 keV','0.3-1.5 keV','1.5-10 keV'],colors=['sl
 def phaserate(hists,mids,exptime,bgb=False,bg=[],ens=['0.3-10 keV','S: 0.3-1.5 keV','H: 1.5-10 keV'],
               colors=['slateblue','maroon','navy','cornflowerblue'],figsize=(8,6),rate=False,
               ls=['solid','solid','solid','solid','solid','solid','solid'],enhist=False,ed=[],pd=pd,enbg=[],norm_bg=[],
-              yrange1=[0,14],yrange2=[-1,1]):
+              yrange1=[0,14],yrange2=[-1,1],rethr=False):
     '''
     Plots step histogram of phase, with count rate on y-axis
     
@@ -136,6 +136,8 @@ def phaserate(hists,mids,exptime,bgb=False,bg=[],ens=['0.3-10 keV','S: 0.3-1.5 k
     rate: boolean for whether to include hardness ratio plot (default False)
           assumes indices of hard and soft to be same as in default ens
     ls: linestyles
+    
+    rethr: boolean determining if hardness ratio values returned
     
     Outputs: 
     --------
@@ -180,18 +182,14 @@ def phaserate(hists,mids,exptime,bgb=False,bg=[],ens=['0.3-10 keV','S: 0.3-1.5 k
             ax[ploc].set_ylim(yrange1)
             ax[ploc].set_yticks(np.arange(yrange1[0],yrange1[1]+1.5,2))
             ax[ploc].minorticks_on()
-#             if enhist:
-#                 ax[0].set_ylim(0,14)
-#                 ax[0].set_yticks(np.arange(0,16,2))
-#                 ax[0].xaxis.set_major_locator(MultipleLocator(0.5))
-#                 ax[0].xaxis.set_minor_locator(MultipleLocator(0.1))
+
         else: 
             ax.errorbar(mids,hist[0],yerr=err,linestyle='none',color=colors[h])
-            ax.set_ylabel('Rate (c/s)',fontsize=14)
+            ax.set_ylabel('Rate (c/s)',fontsize=16)
         ratehists.append(hist)
         errs.append(err)
     plt.xlim(0,2)
-    plt.xlabel('Phase',fontsize=18)
+    plt.xlabel('Phase',fontsize=16)
     if rate: ax[ploc].legend(loc='upper right') #fixing for now
     else: ax.legend()
     if enhist: rloc = 2
@@ -214,11 +212,6 @@ def phaserate(hists,mids,exptime,bgb=False,bg=[],ens=['0.3-10 keV','S: 0.3-1.5 k
         ax[rloc].errorbar(mids,hr,yerr=rerr,linestyle='none',color='slateblue')
         #ax[rloc].legend()
         ax[rloc].set_ylabel('HR',fontsize=18)
-#         if enhist:
-#             ax[rloc].set_ylim(-.2,.15)
-#             ax[rloc].set_yticks(np.arange(-.2,.2,.05))
-#             ax[rloc].xaxis.set_major_locator(MultipleLocator(0.5))
-#             ax[rloc].xaxis.set_minor_locator(MultipleLocator(0.1))
         ax[rloc].set_ylim(yrange2)
         ax[rloc].set_yticks(np.arange(yrange2[0],yrange2[1]+0.03,.1))
         ax[rloc].set_xticks(np.arange(0,2.1,0.5))
@@ -258,7 +251,8 @@ def phaserate(hists,mids,exptime,bgb=False,bg=[],ens=['0.3-10 keV','S: 0.3-1.5 k
         #plt.colorbar().set_label(label='a label',size=15,weight='bold')
         cbar.set_label(label='Normalized Counts',size=18)
         #cbar.ax.tick_params() 
-    return ratehists,errs
+    if rethr: return [hr,rerr],ratehists,errs
+    else: return ratehists,errs
 
 
 def s_phaserate(hist,mids,exptime,color='slateblue',bins=16,label='',scale=1): #16 bins means 16 phase bins (32 total)
@@ -283,14 +277,16 @@ def s_phaserate(hist,mids,exptime,color='slateblue',bins=16,label='',scale=1): #
     '''
     counts = hist[0]*scale #array of counts in each bin multiplied by optional scale factor
     binb = hist[1] #array of bin boundaries
-    cr = counts*bins/exptime
-    hist = plt.hist(binb[:-1],binb,weights=cr,color=color,histtype='step',label=label)
-    err = np.sqrt(counts)*bins/exptime
+    if scale == 1: cr = counts*bins/exptime
+    else: cr = counts
+    hist2 = plt.hist(binb[:-1],binb,weights=cr,color=color,histtype='step',label=label)
+    if scale == 1: err = np.sqrt(counts)*bins/exptime
+    else: err = scale*np.sqrt(hist[0])
     plt.errorbar(mids,cr,yerr=err,color=color,linestyle='none')
     plt.xlim(0,2)
     plt.xlabel('Phase',fontsize=14)
     plt.ylabel('Counts/s',fontsize=14)
-    return hist,err
+    return hist2,err
 
 
 def phaseroll(bins,weights,by,mids,err=0,figsize=(8,6),color='slateblue',label=''):
@@ -313,7 +309,7 @@ def phaseroll(bins,weights,by,mids,err=0,figsize=(8,6),color='slateblue',label='
     plt.figure(figsize=figsize)
     hist = plt.hist(bins[:-1],bins,weights=ws,color=color,histtype='step',label=label)
     plt.xlim(0,2)
-    plt.xlabel('Phase',fontsize=14)
+    plt.xlabel('Phase',fontsize=16)
     plt.ylabel('Counts/s',fontsize=14)
     plt.errorbar(mids,ws,yerr=e,color=color,linestyle='none')
     return hist
