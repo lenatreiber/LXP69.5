@@ -255,7 +255,7 @@ def phaserate(hists,mids,exptime,bgb=False,bg=[],ens=['0.3-10 keV','S: 0.3-1.5 k
     else: return ratehists,errs
 
 
-def s_phaserate(hist,mids,exptime,color='slateblue',bins=16,label='',scale=1): #16 bins means 16 phase bins (32 total)
+def s_phaserate(hist,mids,exptime,color='slateblue',bins=32,label='',scale=1,bgb=False,bg=[]): #16 bins means 16 phase bins (32 total)
     '''
     Plots single phase-folded step hist, with count rate on y-axis
     
@@ -269,6 +269,8 @@ def s_phaserate(hist,mids,exptime,color='slateblue',bins=16,label='',scale=1): #
     ----------------
     color
     bins: # of phase bins (note that this value different from other bin args
+    bgb: whether background included for background subtraction
+    bg:
     
     Outputs:
     --------
@@ -277,7 +279,8 @@ def s_phaserate(hist,mids,exptime,color='slateblue',bins=16,label='',scale=1): #
     '''
     counts = hist[0]*scale #array of counts in each bin multiplied by optional scale factor
     binb = hist[1] #array of bin boundaries
-    if scale == 1: cr = counts*bins/exptime
+    if bgb and scale ==1: cr = (counts*bins/(exptime))-bg
+    elif scale == 1: cr = counts*bins/exptime
     else: cr = counts
     hist2 = plt.hist(binb[:-1],binb,weights=cr,color=color,histtype='step',label=label)
     if scale == 1: err = np.sqrt(counts)*bins/exptime
@@ -297,7 +300,7 @@ def phaseroll(bins,weights,by,mids,err=0,figsize=(8,6),color='slateblue',label='
     -------
     bins
     weights
-    by: how many bins to shift by (end goes back to beginning
+    by: how many bins to shift by (end goes back to beginning)
     Optional Inputs:
     ----------------
     err: array of errors for bins
@@ -469,4 +472,96 @@ def stingphase(evt_data,freq,figsize=(10,10),nbins=32,save=False,pname='stingpha
         plt.savefig(pname+'.png',dpi=200,bbox_inches='tight')
     
     
+def pf(evt,pd,expt,bg=True,bgs=[],scale=1,guess=False,gf=0.8):
+    #make separate tables for each energy band
+    en1 = evt[evt['PI']<=70]
+    en2 = evt[evt['PI']>70]
+    en2 = en2[en2['PI']<=100]
+    en3 = evt[evt['PI']>100]
+    en3 = en3[en3['PI']<=150]
+    en4 = evt[evt['PI']>150]
+    en4 = en4[en4['PI']<=200]
+    en5 = evt[evt['PI']>200]
+    en5 = en5[en5['PI']<=300]
+    en6 = evt[evt['PI']>300]
+    en6 = en6[en6['PI']<=500]
+    en7 = evt[evt['PI']>500]
+    en7 = en7[en7['PI']<=800]
+    #how much to subtract from each bin
     
+    if bg:
+        bg1 = bgs[0]*len(en1)/expt #avg rate * percentage that's BG
+        bg2 = bgs[1]*len(en2)/expt
+        bg3 = bgs[2]*len(en3)/expt
+        bg4 = bgs[3]*len(en4)/expt
+        bg5 = bgs[4]*len(en5)/expt
+        bg6 = bgs[5]*len(en6)/expt
+        bg7 = bgs[6]*len(en7)/expt
+        pfbg = scale*np.array([bg1,bg2,bg3,bg4,bg5,bg6,bg7])
+    #counts histogram
+    pfens,pfmids = phasehist_sh([en1,en2,en3,en4,en5,en6,en7],pd,ens=['0.3-0.7','0.7-1.0','1.0-1.5','1.5-2.0','2.0-3.0','3.0-5.0','5.0-8.0'],
+               colors=['palevioletred','rebeccapurple','cornflowerblue','royalblue','navy','darkseagreen','darkgreen'],figsize=(5,4))
+    plt.close()
+    if guess:
+        #find CRs without bg-subtraction
+        pfcr,pfcrerr = phaserate(pfens,pfmids,expt,ens=['0.3-0.7','0.7-1.0','1.0-1.5','1.5-2.0','2.0-3.0','3.0-5.0','5.0-8.0'],
+               colors=['palevioletred','rebeccapurple','cornflowerblue','royalblue','navy','darkseagreen','darkgreen'],
+                           rate=False,figsize=(4,2))
+        plt.close()
+        bgguess = gf*np.min(pfcr[-1][0])/bg7
+        #guess background for epoch 1
+        print(bgguess)
+        pfbg = bgguess*np.array(pfbg)
+    
+    #count rate histograms
+    if bg: 
+        pfcr,pfcrerr = phaserate(pfens,pfmids,expt,ens=['0.3-0.7','0.7-1.0','1.0-1.5','1.5-2.0','2.0-3.0','3.0-5.0','5.0-8.0'],
+               colors=['palevioletred','rebeccapurple','cornflowerblue','royalblue','navy','darkseagreen','darkgreen'],
+                           rate=False,figsize=(4,2),bgb=True,bg=pfbg)
+    else: 
+        #no bg-subtraction
+        pfcr,pfcrerr = phaserate(pfens,pfmids,expt,ens=['0.3-0.7','0.7-1.0','1.0-1.5','1.5-2.0','2.0-3.0','3.0-5.0','5.0-8.0'],
+               colors=['palevioletred','rebeccapurple','cornflowerblue','royalblue','navy','darkseagreen','darkgreen'],
+                           rate=False,figsize=(4,2))
+    plt.close()
+    
+    #calculated pulsed fractions
+    #with bg-subtraction
+    pfr = [] #PF and PF error
+    pfnr = [] #just PF
+    pfer = [] #just PF error
+    for i in range(7):
+        cr = pfcr[i][0]
+        totlen = len(cr)
+        r = cr[:int(totlen/2)] #first half of count rates, since second half just repeated
+        e = pfcrerr[i][:int(totlen/2)] #errors originally from sqrt of counts
+        rerr = unumpy.uarray(r,e)
+        rmax = rerr.max()
+        rmin = rerr.min()
+        pfr.append((rmax-rmin)/(rmax+rmin))
+        pfnr.append(((rmax-rmin)/(rmax+rmin)).n) #value
+        pfer.append(((rmax-rmin)/(rmax+rmin)).s) #propogated error
+    #return PFs and PF errors separately
+    return pfnr,pfer
+
+def spf(evt,pd,expt,bg=True,sbg=0,scale=1,guess=False,gf=0.8):
+    '''Calculate PF for 0.3-8.0 band'''
+    pfbg = scale*sbg*len(evt)/expt
+    pfens,pfmids = phasehist(evt,pd,figsize=(4,3),bins=64) #32 phase bins
+    plt.close()
+    if bg: 
+        pfcr,pfcrerr = s_phaserate(pfens,pfmids,expt,bins=32,bgb=bg,bg=pfbg)
+        plt.close()
+    #calculation of single PF value
+    cr = pfcr[0]
+    totlen = len(cr)
+    r = cr[:int(totlen/2)] #first half of count rates, since second half just repeated
+    e = pfcrerr[:int(totlen/2)] #errors originally from sqrt of counts
+    rerr = unumpy.uarray(r,e)
+    rmax = rerr.max()
+    rmin = rerr.min()
+    pfr = (rmax-rmin)/(rmax+rmin)
+    pfnr = ((rmax-rmin)/(rmax+rmin)).n #value
+    pfer = ((rmax-rmin)/(rmax+rmin)).s #propogated error
+    #return PFs and PF errors separately
+    return pfnr,pfer
