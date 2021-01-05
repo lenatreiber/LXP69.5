@@ -13,6 +13,8 @@ from stingray.pulse.search import phaseogram, plot_phaseogram, plot_profile
 from matplotlib.ticker import (MultipleLocator, FormatStrFormatter,
                                AutoMinorLocator)
 from scipy.ndimage.filters import gaussian_filter
+import scipy.stats as st
+
 
 def readevt(file,ind=1):
     '''
@@ -115,7 +117,7 @@ def phasehist_sh(ed,pd,ens=['0.3-10 keV','0.3-1.5 keV','1.5-10 keV'],colors=['sl
 def phaserate(hists,mids,exptime,bgb=False,bg=[],ens=['0.3-10 keV','S: 0.3-1.5 keV','H: 1.5-10 keV'],
               colors=['slateblue','maroon','navy','cornflowerblue'],figsize=(8,6),rate=False,
               ls=['solid','solid','solid','solid','solid','solid','solid'],enhist=False,ed=[],pd=pd,enbg=[],norm_bg=[],
-              yrange1=[0,14],yrange2=[-1,1],rethr=False):
+              yrange1=[0,14],yrange2=[-1,1],rethr=False,title=''):
     '''
     Plots step histogram of phase, with count rate on y-axis
     
@@ -138,6 +140,7 @@ def phaserate(hists,mids,exptime,bgb=False,bg=[],ens=['0.3-10 keV','S: 0.3-1.5 k
     ls: linestyles
     
     rethr: boolean determining if hardness ratio values returned
+    title: string for fig title; used if length > 0 
     
     Outputs: 
     --------
@@ -178,7 +181,7 @@ def phaserate(hists,mids,exptime,bgb=False,bg=[],ens=['0.3-10 keV','S: 0.3-1.5 k
             ax[ploc].set_ylabel('Rate (c/s)',fontsize=18)
             ax[ploc].set_xlim(0,2)
             ax[ploc].set_xticks(np.arange(0,2,.5))
-            ax[ploc].set_xticklabels(['','','','',''])
+            if enhist: ax[ploc].set_xticklabels(['','','','',''])
             ax[ploc].set_ylim(yrange1)
             ax[ploc].set_yticks(np.arange(yrange1[0],yrange1[1]+1.5,2))
             ax[ploc].minorticks_on()
@@ -216,7 +219,12 @@ def phaserate(hists,mids,exptime,bgb=False,bg=[],ens=['0.3-10 keV','S: 0.3-1.5 k
         ax[rloc].set_yticks(np.arange(yrange2[0],yrange2[1]+0.03,.1))
         ax[rloc].set_xticks(np.arange(0,2.1,0.5))
         ax[rloc].minorticks_on()
-        #add hardness ratio errors  
+        #add hardness ratio errors
+        
+        #use horizontal shading for mean HR and error
+        mean_hr = np.mean(hr)
+        mean_hr_err = st.sem(hr)
+        ax[rloc].axhspan(mean_hr-mean_hr_err,mean_hr+mean_hr_err,color='slateblue',alpha=.4)
     #puts bg-subtracted, normalized, smoothed energy-phase heat map
     if enhist:
         norm_bg_fil=gaussian_filter(norm_bg, 0.8,mode='wrap')
@@ -251,6 +259,8 @@ def phaserate(hists,mids,exptime,bgb=False,bg=[],ens=['0.3-10 keV','S: 0.3-1.5 k
         #plt.colorbar().set_label(label='a label',size=15,weight='bold')
         cbar.set_label(label='Normalized Counts',size=18)
         #cbar.ax.tick_params() 
+    if len(title)>0: ax[0].set_title(title,fontsize=18)
+        
     if rethr: return [hr,rerr],ratehists,errs
     else: return ratehists,errs
 
@@ -292,7 +302,7 @@ def s_phaserate(hist,mids,exptime,color='slateblue',bins=32,label='',scale=1,bgb
     return hist2,err
 
 
-def phaseroll(bins,weights,by,mids,err=0,figsize=(8,6),color='slateblue',label=''):
+def phaseroll(bins,weights,by,mids,err=0,figsize=(8,6),color='slateblue',label='',ls='solid',new=True,reterr=False):
     '''
     Roll/shift histogram by some number of bins
     
@@ -309,13 +319,14 @@ def phaseroll(bins,weights,by,mids,err=0,figsize=(8,6),color='slateblue',label='
     '''
     ws = np.roll(weights,by) #shifted weights by some number of bins
     e = np.roll(err,by) #haven't tested shifted error
-    plt.figure(figsize=figsize)
-    hist = plt.hist(bins[:-1],bins,weights=ws,color=color,histtype='step',label=label)
+    if new: plt.figure(figsize=figsize)
+    hist = plt.hist(bins[:-1],bins,weights=ws,color=color,histtype='step',label=label,ls=ls)
     plt.xlim(0,2)
     plt.xlabel('Phase',fontsize=16)
     plt.ylabel('Counts/s',fontsize=14)
     plt.errorbar(mids,ws,yerr=e,color=color,linestyle='none')
-    return hist
+    if reterr: return hist,e
+    else: return hist
     
     
 def binpi(evt_data,secs=10):
@@ -472,7 +483,10 @@ def stingphase(evt_data,freq,figsize=(10,10),nbins=32,save=False,pname='stingpha
         plt.savefig(pname+'.png',dpi=200,bbox_inches='tight')
     
     
-def pf(evt,pd,expt,bg=True,bgs=[],scale=1,guess=False,gf=0.8):
+def pf(evt,pd,expt,bg=True,bgs=[],scale=1,guess=False,gf=0.8,retearly=False,onehard=False,nbins=64,plot=False):
+    '''Make separate event tables for each energy band used in PF vs. energy fig
+    onehard: only one bin from 3.0-8.0 keV
+    nbins: total number of bins; so #phase bins is half of value given'''
     #make separate tables for each energy band
     en1 = evt[evt['PI']<=70]
     en2 = evt[evt['PI']>70]
@@ -484,9 +498,13 @@ def pf(evt,pd,expt,bg=True,bgs=[],scale=1,guess=False,gf=0.8):
     en5 = evt[evt['PI']>200]
     en5 = en5[en5['PI']<=300]
     en6 = evt[evt['PI']>300]
-    en6 = en6[en6['PI']<=500]
-    en7 = evt[evt['PI']>500]
-    en7 = en7[en7['PI']<=800]
+    #only one bin 3-8 keV
+    if onehard: en6 = en6[en6['PI']<=800]
+    #two bins 3-8 keV
+    else:
+        en6 = en6[en6['PI']<=500]
+        en7 = evt[evt['PI']>500]
+        en7 = en7[en7['PI']<=800]
     #how much to subtract from each bin
     
     if bg:
@@ -496,18 +514,30 @@ def pf(evt,pd,expt,bg=True,bgs=[],scale=1,guess=False,gf=0.8):
         bg4 = bgs[3]*len(en4)/expt
         bg5 = bgs[4]*len(en5)/expt
         bg6 = bgs[5]*len(en6)/expt
-        bg7 = bgs[6]*len(en7)/expt
-        pfbg = scale*np.array([bg1,bg2,bg3,bg4,bg5,bg6,bg7])
+        if not onehard: 
+            bg7 = bgs[6]*len(en7)/expt
+            pfbg = scale*np.array([bg1,bg2,bg3,bg4,bg5,bg6,bg7])
+        else: 
+            pfbg = scale*np.array([bg1,bg2,bg3,bg4,bg5,bg6])
+    #energy list of labels whether or not bg-subtraction
+    if onehard:
+        ens=['0.3-0.7','0.7-1.0','1.0-1.5','1.5-2.0','2.0-3.0','3.0-8.0']
+        #list of evt tables
+        entab = [en1,en2,en3,en4,en5,en6]
+    else: 
+        ens=['0.3-0.7','0.7-1.0','1.0-1.5','1.5-2.0','2.0-3.0','3.0-5.0','5.0-8.0']
+        entab = [en1,en2,en3,en4,en5,en6,en7]
+
     #counts histogram
-    pfens,pfmids = phasehist_sh([en1,en2,en3,en4,en5,en6,en7],pd,ens=['0.3-0.7','0.7-1.0','1.0-1.5','1.5-2.0','2.0-3.0','3.0-5.0','5.0-8.0'],
+    pfens,pfmids = phasehist_sh(entab,pd,ens=ens,bins=nbins,
                colors=['palevioletred','rebeccapurple','cornflowerblue','royalblue','navy','darkseagreen','darkgreen'],figsize=(5,4))
-    plt.close()
+    if not plot: plt.close()
     if guess:
         #find CRs without bg-subtraction
-        pfcr,pfcrerr = phaserate(pfens,pfmids,expt,ens=['0.3-0.7','0.7-1.0','1.0-1.5','1.5-2.0','2.0-3.0','3.0-5.0','5.0-8.0'],
+        pfcr,pfcrerr = phaserate(pfens,pfmids,expt,ens=ens,
                colors=['palevioletred','rebeccapurple','cornflowerblue','royalblue','navy','darkseagreen','darkgreen'],
                            rate=False,figsize=(4,2))
-        plt.close()
+        if not plot: plt.close()
         bgguess = gf*np.min(pfcr[-1][0])/bg7
         #guess background for epoch 1
         print(bgguess)
@@ -515,22 +545,24 @@ def pf(evt,pd,expt,bg=True,bgs=[],scale=1,guess=False,gf=0.8):
     
     #count rate histograms
     if bg: 
-        pfcr,pfcrerr = phaserate(pfens,pfmids,expt,ens=['0.3-0.7','0.7-1.0','1.0-1.5','1.5-2.0','2.0-3.0','3.0-5.0','5.0-8.0'],
+        pfcr,pfcrerr = phaserate(pfens,pfmids,expt,ens=ens,
                colors=['palevioletred','rebeccapurple','cornflowerblue','royalblue','navy','darkseagreen','darkgreen'],
-                           rate=False,figsize=(4,2),bgb=True,bg=pfbg)
+                           rate=False,figsize=(7,4),bgb=True,bg=pfbg)
     else: 
         #no bg-subtraction
-        pfcr,pfcrerr = phaserate(pfens,pfmids,expt,ens=['0.3-0.7','0.7-1.0','1.0-1.5','1.5-2.0','2.0-3.0','3.0-5.0','5.0-8.0'],
+        pfcr,pfcrerr = phaserate(pfens,pfmids,expt,ens=ens,
                colors=['palevioletred','rebeccapurple','cornflowerblue','royalblue','navy','darkseagreen','darkgreen'],
-                           rate=False,figsize=(4,2))
-    plt.close()
-    
+                           rate=False,figsize=(7,4))
+    if not plot: plt.close()
+    if retearly: return pfcr,pfcrerr
     #calculated pulsed fractions
     #with bg-subtraction
     pfr = [] #PF and PF error
     pfnr = [] #just PF
     pfer = [] #just PF error
-    for i in range(7):
+    if onehard: ennum = 6
+    else: ennum = 7
+    for i in range(ennum):
         cr = pfcr[i][0]
         totlen = len(cr)
         r = cr[:int(totlen/2)] #first half of count rates, since second half just repeated
@@ -544,14 +576,17 @@ def pf(evt,pd,expt,bg=True,bgs=[],scale=1,guess=False,gf=0.8):
     #return PFs and PF errors separately
     return pfnr,pfer
 
-def spf(evt,pd,expt,bg=True,sbg=0,scale=1,guess=False,gf=0.8):
+def spf(evt,pd,expt,bg=True,sbg=0,scale=1,guess=False,gf=0.8,retearly=False,nbins=64):
     '''Calculate PF for 0.3-8.0 band'''
     pfbg = scale*sbg*len(evt)/expt
-    pfens,pfmids = phasehist(evt,pd,figsize=(4,3),bins=64) #32 phase bins
+    pfens,pfmids = phasehist(evt,pd,figsize=(4,3),bins=nbins) #32 phase bins
     plt.close()
     if bg: 
-        pfcr,pfcrerr = s_phaserate(pfens,pfmids,expt,bins=32,bgb=bg,bg=pfbg)
+        #bins argument in s_phaserate is number of phase bins
+        pfcr,pfcrerr = s_phaserate(pfens,pfmids,expt,bins=nbins/2,bgb=bg,bg=pfbg)
         plt.close()
+    #return if using rms PF instead
+    if retearly: return pfcr[0],pfcrerr
     #calculation of single PF value
     cr = pfcr[0]
     totlen = len(cr)
@@ -565,3 +600,36 @@ def spf(evt,pd,expt,bg=True,sbg=0,scale=1,guess=False,gf=0.8):
     pfer = ((rmax-rmin)/(rmax+rmin)).s #propogated error
     #return PFs and PF errors separately
     return pfnr,pfer
+
+def rms_pf(evt,pd,expt,bg=True,bgs=[],scale=1,guess=False,onehard=False,nbins=64,onephase=False,printall=False):
+    '''Calculate PFs using rms definition'''
+    pfcr,pfcrerr = pf(evt,pd,expt,bg=bg,bgs=bgs,scale=scale,guess=guess,retearly=True,onehard=onehard,nbins=nbins)
+    rms_pf = []
+    rms_pfe = []
+    if onehard: ennum = 6
+    else: ennum = 7
+    for i in range(ennum):
+        cr = pfcr[i][0]
+        e = pfcrerr[i]
+        #call function below to get rmf PF for each band
+        rms_pf.append(rms_spf(cr=cr,err=e,onephase=onephase,printall=printall).n)
+        rms_pfe.append(rms_spf(cr=cr,err=e,onephase=onephase).s)
+    return rms_pf,rms_pfe
+        
+def rms_spf(cr=0,err=0,evt=0,pd=0,expt=0,sbg=0,getsingle=False,nbins=64,onephase=True,printall=False):
+    '''Calculate single rms PF'''
+    if getsingle: cr,err = spf(evt,pd,expt,bg=True,sbg=sbg,retearly=True,nbins=nbins)
+    totlen = len(cr)
+    if printall: print('tot len:',totlen)
+    if onephase: #only use up to phase 1 in calculation
+        cr=cr[:int(totlen/2)] #count rate in phase bins up to 1
+        err=err[:int(totlen/2)]
+    rerr=unumpy.uarray(cr,err)
+    #phase-averaged count rate
+    avgr = np.mean(rerr)
+    #len(r) is N (number of phase bins)
+    num = np.sum(((rerr-avgr)**2))/len(cr)
+    if printall: print(len(cr))
+    num = (num)**(1/2)
+    full = num/avgr
+    return full
